@@ -4,6 +4,11 @@
         <meta charset="UTF-8">
         <link rel="stylesheet" type="text/css" href="https://arf20.com/style.css">
         <title>ARFNET</title>
+        <style>
+table, th, td {
+  border: 1px solid #abb2bf;
+}
+        </style>
     </head>
 
     <body>
@@ -15,7 +20,8 @@
             <h2 class="center">Status Monitor</h2>
             <p>This webapp monitors the status of the main ARFNET services from outside the ARFNET network</p>
             <table>
-
+                <tr><th>Type</th><th>Service</th><th>Status</th></tr>
+                %s
             </table>
         </main>
     </body>
