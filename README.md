@@ -15,4 +15,6 @@ make
  - Current service status table
  - Outage events table
  - Uptime counter (total, month)
+ - Alerts
+ - Centralised config
 
