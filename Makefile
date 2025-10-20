@@ -1,6 +1,6 @@
 CC = gcc
 CFLAGS = -g -Wall -pedantic
-LDFLAGS = -lmicrohttpd
+LDFLAGS = -lmicrohttpd -lcurl
 
 BIN = monitor
 SRC = main.c monitor.c

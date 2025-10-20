@@ -1,16 +1,18 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <sys/socket.h>
-
 #include <netinet/in.h>
 #include <arpa/inet.h>
-
-#include <microhttpd.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
+
+#include <microhttpd.h>
+
+
 
 #include "monitor.h"
 
@@ -35,7 +37,13 @@ enum MHD_Result answer_to_connection(
         (const struct sockaddr_in**)MHD_get_connection_info(
             connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS);
 
-    printf("%s - %s %s: ", inet_ntoa((*coninfo)->sin_addr), method, url);
+    time_t time_now = time(NULL);
+    struct tm *tm_now = gmtime(&time_now);
+    static char timestr[256];
+    strftime(timestr, 256, "%Y-%m-%d %H-%M-%S", tm_now);
+
+    printf("[%s] [webserver] %s %s %s: ",
+        timestr, inet_ntoa((*coninfo)->sin_addr), method, url);
 
     struct MHD_Response *response;
     int ret;

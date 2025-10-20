@@ -2,6 +2,14 @@
 
 ARFNET Status Monitor
 
+## Building
+
+Depends on libmicrohttpd, libcurl
+
+```
+make
+```
+
 ## Features (TODO)
 
  - Current service status table
