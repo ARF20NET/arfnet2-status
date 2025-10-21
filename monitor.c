@@ -1,3 +1,4 @@
+#define _GNU_SOURCE /* forgive me */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +8,9 @@
 #include <curl/curl.h>
 
 #include "monitor.h"
+
+#define BUFF_SIZE           65535
+#define INIT_VEC_CAPACITY   256
 
 typedef enum {
     TYPE_REACH,
@@ -22,27 +26,108 @@ typedef enum {
 } status_t;
 
 typedef struct {
-    type_t type;
-    char *target;
+    time_t time;
     status_t status;
+} event_t;
+
+typedef struct {
+    type_t type;
+    char *name;
+    char *target;
+
+    status_t status;
+
+    event_t *events;
+    size_t event_size, event_capacity;
 } target_t;
 
 
-static target_t targets[256];
+static target_t targets[INIT_VEC_CAPACITY];
 static size_t target_n = 0;
 
 
 static char timestr[256];
 
-static size_t
-write_data(void *ptr, size_t size, size_t nmemb, void *stream)
+
+
+static void
+target_events_push(target_t *target, event_t event)
 {
-    return size * nmemb;
+    if (target->event_size + 1 > target->event_capacity)
+        target->events = realloc(target->events, 2 * target->event_capacity);
+
+    target->events[target->event_size++] = event;
+}
+
+static size_t
+target_events_load(target_t *target, const char *logbuff) {
+    char line[256];
+    size_t n = 0;
+
+    while (*logbuff) {
+        char *nlpos = strchr(logbuff, '\n');
+        if (!nlpos)
+            return n;
+
+        size_t linelen = nlpos - logbuff;
+        strncpy(line, logbuff, linelen);
+        line[linelen] = '\0';
+        logbuff += linelen + 1;
+
+        /* process line */
+        if (line[0] == '\0' || line[0] == '#')
+            continue;
+
+        char *name = strtok(line, ",");
+        char *time = strtok(NULL, ",");
+        char *status = strtok(NULL, ",");
+
+        if (!name || !time || !status) {
+            fprintf(stderr, "malformed log line: %s\n", line);
+            continue;
+        }
+
+        if (strcmp(name, target->name) != 0)
+            continue;
+
+        struct tm event_time;
+        strptime(time, "%Y-%m-%d %H-%M-%S", &event_time);
+
+        event_t event = {
+            mktime(&event_time),
+            strcmp(status, "up") == 0 ? STATUS_UP : STATUS_DOWN
+        };
+
+        target_events_push(target, event);
+
+        n++;
+    }
+
+    return n;
 }
 
 int
-monitor_init(const char *cfg_file) {
-    FILE *cfgf = fopen(cfg_file, "r");
+monitor_init(const char *cfg_path, const char *log_path) {
+    /* read monitor log */
+    FILE *logf = fopen(log_path, "r");
+    if (!logf) {
+        fprintf(stderr, "Error opening log: %s\n", strerror(errno));
+        return -1;
+    }
+
+    fseek(logf, 0, SEEK_END);
+    size_t logsize = ftell(logf);
+    rewind(logf);
+
+    char *logbuff = malloc(logsize + 1);
+    size_t logread = fread(logbuff, 1, logsize, logf);
+    fclose(logf);
+
+    logbuff[logread] = '\0';
+
+
+    /* read monitoring configuration */
+    FILE *cfgf = fopen(cfg_path, "r");
     if (!cfgf) {
         fprintf(stderr, "Error opening config: %s\n", strerror(errno));
         return -1;
@@ -57,15 +142,14 @@ monitor_init(const char *cfg_file) {
 
         line[strlen(line) - 1] = '\0'; /* strip \n */
 
-        char *type = line;
-        char *target = strchr(line, '=');
-        if (!target) {
+        char *type = strtok(line, ",");
+        char *name = strtok(NULL, ",");
+        char *target = strtok(NULL, ",");
+
+        if (!target || !name || !target) {
             fprintf(stderr, "malformed config line: %s\n", line);
             continue;
         }
-
-        *target = '\0';
-        target++;
 
         if (strcmp(type, "reach") == 0)
             targets[target_n].type = TYPE_REACH;
@@ -74,11 +158,23 @@ monitor_init(const char *cfg_file) {
         else if (strcmp(type, "web") == 0)
             targets[target_n].type = TYPE_WEB;
 
+        targets[target_n].name = strdup(name);
         targets[target_n].target = strdup(target);
         targets[target_n].status = STATUS_DOWN;
 
-        printf("\t%s: %s\n", type_str[targets[target_n].type],
-            targets[target_n].target);
+        /* read monitor logs */
+        targets[target_n].event_capacity = INIT_VEC_CAPACITY;
+        targets[target_n].event_size = 0;
+        targets[target_n].events = malloc(INIT_VEC_CAPACITY * sizeof(event_t));
+
+        size_t event_n = target_events_load(&targets[target_n], logbuff);
+
+        printf("\t%s: %s,%s %ld events\n",
+            targets[target_n].name,
+            type_str[targets[target_n].type],
+            targets[target_n].target,
+            event_n
+        );
         
         target_n++;
     } 
@@ -98,7 +194,7 @@ monitor_init(const char *cfg_file) {
 const char *
 monitor_generate_status_html()
 {
-    static char buff[65535];
+    static char buff[BUFF_SIZE];
 
     static char *status_html[] = {
         "<td class=\"down\">down</td>",
@@ -108,14 +204,29 @@ monitor_generate_status_html()
     char *pos = buff;
 
     for (size_t i = 0; i < target_n; i++) {
-        pos += snprintf(pos, 65535,
-            "<tr><td>%s</td><td>%s</td>%s</tr>\n",
+        pos += snprintf(pos, BUFF_SIZE,
+            "<tr><td>%s</td><td>%s</td>%s<td></td><td>%s</td><td>%s</td>%s</tr>\n",
             type_str[targets[i].type],
             targets[i].target,
-            status_html[targets[i].status]);
+            status_html[targets[i].status],
+            "",
+            "",
+            ""
+        );
     }
 
     return buff;  
+}
+
+
+const char *
+monitor_generate_incidents_html()
+{
+    static char buff[BUFF_SIZE];
+   
+    snprintf(buff, BUFF_SIZE, "<tr><td></td><td></td><td></td></tr>");
+
+    return buff;
 }
 
 static int
@@ -169,6 +280,12 @@ check_dns(const char *name)
     return STATUS_UP;
 }
 
+static size_t
+write_data(void *ptr, size_t size, size_t nmemb, void *stream)
+{
+    return size * nmemb;
+}
+
 static int
 check_http(const char *endpoint)
 {
@@ -215,8 +332,8 @@ monitor_check()
     };
 
     for (size_t i = 0; i < target_n; i++) {
-        printf("[%s] [monitor] check #%ld %s: %s: ",
-            timestr, check_num, type_str[targets[i].type], targets[i].target);
+        printf("[%s] [monitor] check #%ld %s: ",
+            timestr, check_num, targets[i].name);
         targets[i].status = check_funcs[targets[i].type](targets[i].target);
     }
 
