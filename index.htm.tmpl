@@ -16,6 +16,15 @@ table, th, td {
 .down {
     background-color: red;
 }
+
+.row {
+
+}
+
+.col {
+    float: left;
+    width: 50%;
+}
         </style>
     </head>
 
@@ -27,10 +36,25 @@ table, th, td {
         <main>
             <h2 class="center">Status Monitor</h2>
             <p>This webapp monitors the status of the main ARFNET services from outside the ARFNET network</p>
-            <table>
-                <tr><th>Type</th><th>Service</th><th>Status</th></tr>
-                %s
-            </table>
+            <div class="col">
+                Services
+                <table>
+                    <tr><th>Type</th><th>Service</th><th>Status</th></tr>
+                    %s
+                </table>
+            </div>
+            <div class="col">
+                Uptime
+                <table>
+                    <tr><th>Week %%up</th><th>Month %%up</th><th>Total %%up since %s</th></tr>
+                    <tr><td>%s</td><td>%s</td><td>%s</td></tr>
+                </table>
+                Incidents
+                <table>
+                    <tr><th>Resolved</th><th>Started</th><th>Duration</th></tr>
+                    <tr>%s</tr>
+                </table>
+            </div>
         </main>
     </body>
 </html>

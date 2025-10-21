@@ -50,7 +50,9 @@ enum MHD_Result answer_to_connection(
 
     if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
         snprintf(buff, RES_BUFF,
-            index_format_template, monitor_generate_status_html());
+            index_format_template,
+            monitor_generate_status_html(), "(since)", "(week %up)",
+            "(month %up)", "(total %up)", "(incidents)");
 
         response = MHD_create_response_from_buffer(strlen(buff), (void*)buff,
             MHD_RESPMEM_PERSISTENT);

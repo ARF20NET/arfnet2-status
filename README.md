@@ -12,9 +12,9 @@ make
 
 ## Features (TODO)
 
- - Current service status table
- - Outage events table
- - Uptime counter (total, month)
- - Alerts
- - Centralised config
+ [X] Current service status table
+ [ ] Outage events table
+ [ ] Uptime counter (total, month)
+ [ ] Alerts
+ [ ] Centralised config
 
