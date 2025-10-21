@@ -31,7 +31,6 @@ typedef struct {
 static target_t targets[256];
 static size_t target_n = 0;
 
-static CURL *curl;
 
 static char timestr[256];
 
@@ -93,16 +92,7 @@ monitor_init(const char *cfg_file) {
         return -1;
     }
 
-    curl = curl_easy_init();
-    if (!curl) {
-        fprintf(stderr, "Error allocating cURL handle\n");
-        return -1;
-    }
-
-    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-
-    return 0;
+        return 0;
 }
 
 const char *
@@ -111,15 +101,15 @@ monitor_generate_status_html()
     static char buff[65535];
 
     static char *status_html[] = {
-        "down",
-        "up"
+        "<td class=\"down\">down</td>",
+        "<td class=\"up\">up</td>"
     };
    
     char *pos = buff;
 
     for (size_t i = 0; i < target_n; i++) {
         pos += snprintf(pos, 65535,
-            "<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+            "<tr><td>%s</td><td>%s</td>%s</tr>\n",
             type_str[targets[i].type],
             targets[i].target,
             status_html[targets[i].status]);
@@ -129,40 +119,91 @@ monitor_generate_status_html()
 }
 
 static int
-check_reach(const char *endpoint)
+check_reach(const char *target)
 {
-    return STATUS_DOWN;
+    static char ping_cmd[256];
+    
+    snprintf(ping_cmd, 256, "ping -W1 -c1 %s > /dev/null", target);
+    /* i know */
+    if (system(ping_cmd) == 0) {
+        printf("reachable\n");
+        return STATUS_UP;
+    } else {
+        printf("unreachable\n");
+        return STATUS_DOWN;
+    }
 }
 
 static int
-check_dns(const char *endpoint)
+check_dns(const char *name)
 {
-    return STATUS_DOWN;
+    static char dig_cmd[512];
+    static char cmd_out[256];
+
+    snprintf(dig_cmd, 512, "dig +nocookie +short %s NS", name);
+    FILE *pf = popen(dig_cmd, "r");
+    fread(cmd_out, 256, 1, pf);
+    pclose(pf);
+
+    if (*cmd_out == '\0') {
+        printf("no ns\n");
+        return STATUS_DOWN;
+    }
+    
+    *strchr(cmd_out, '\n') = '\0';
+
+    snprintf(dig_cmd, 512, "dig +nocookie +short @%s %s A", cmd_out, name);
+    pf = popen(dig_cmd, "r");
+    fread(cmd_out, 256, 1, pf);
+    pclose(pf);
+    
+    if (*cmd_out == '\0') {
+        printf("no a\n");
+        return STATUS_DOWN;
+    }
+    
+    *strchr(cmd_out, '\n') = '\0';
+
+    printf("%s\n", cmd_out);
+
+    return STATUS_UP;
 }
 
 static int
 check_http(const char *endpoint)
 {
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "Error allocating cURL handle\n");
+        return -1;
+    }
+
+    //curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 1);
+
     curl_easy_setopt(curl, CURLOPT_URL, endpoint);
     CURLcode curl_code = curl_easy_perform(curl);
     if (curl_code != CURLE_OK) {
-        printf("[%s] [monitor] check http: %s: curl_easy_perform() failed: %s\n",
-            timestr, endpoint, curl_easy_strerror(curl_code));
+        printf("curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(curl_code));
         return STATUS_DOWN;
     }
 
     long http_code;
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
-    printf("[%s] [monitor] check http: %s: %ld\n",
-        timestr, endpoint, http_code);
+    curl_easy_cleanup(curl);
 
-    return STATUS_UP;
+    printf("%ld\n", http_code);
+
+    return http_code == 200 ? STATUS_UP : STATUS_DOWN;
 }
 
 void
 monitor_check()
 {
+    static size_t check_num = 0;
     time_t time_now = time(NULL);
     struct tm *tm_now = gmtime(&time_now);
     strftime(timestr, 256, "%Y-%m-%d %H-%M-%S", tm_now);
@@ -173,7 +214,12 @@ monitor_check()
         check_http
     };
 
-    for (size_t i = 0; i < target_n; i++)
+    for (size_t i = 0; i < target_n; i++) {
+        printf("[%s] [monitor] check #%ld %s: %s: ",
+            timestr, check_num, type_str[targets[i].type], targets[i].target);
         targets[i].status = check_funcs[targets[i].type](targets[i].target);
+    }
+
+    check_num++;
 }
 
