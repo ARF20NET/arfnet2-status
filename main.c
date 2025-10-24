@@ -40,7 +40,7 @@ enum MHD_Result answer_to_connection(
     time_t time_now = time(NULL);
     struct tm *tm_now = gmtime(&time_now);
     static char timestr[256];
-    strftime(timestr, 256, "%Y-%m-%d %H-%M-%S", tm_now);
+    strftime(timestr, 256, "%Y-%m-%d %H:%M:%S", tm_now);
 
     printf("[%s] [webserver] %s %s %s: ",
         timestr, inet_ntoa((*coninfo)->sin_addr), method, url);
@@ -51,7 +51,7 @@ enum MHD_Result answer_to_connection(
     if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
         snprintf(buff, RES_BUFF,
             index_format_template,
-            monitor_generate_status_html(), "(incidents)");
+            monitor_generate_status_html(), monitor_generate_incidents_html());
 
         response = MHD_create_response_from_buffer(strlen(buff), (void*)buff,
             MHD_RESPMEM_PERSISTENT);

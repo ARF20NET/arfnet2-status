@@ -38,25 +38,58 @@ typedef struct {
     status_t status;
 
     event_t *events;
-    size_t event_size, event_capacity;
+    size_t events_size, events_capacity;
 } target_t;
+
+/* baked */
+typedef struct {
+    time_t started_time;
+    time_t duration_time;
+    int resolved;
+    char *service;
+    char *started;
+    char *duration;
+} incident_t;
 
 
 static target_t targets[INIT_VEC_CAPACITY];
-static size_t target_n = 0;
+static size_t targets_n = 0;
 
+/* ordered*/
+static incident_t *incidents = NULL;
+static size_t incidents_size = 0, incidents_capacity = 0;
 
 static char timestr[256];
-
 
 
 static void
 target_events_push(target_t *target, event_t event)
 {
-    if (target->event_size + 1 > target->event_capacity)
-        target->events = realloc(target->events, 2 * target->event_capacity);
+    if (target->events_size + 1 > target->events_capacity)
+        target->events = realloc(target->events,
+            2 * sizeof(event_t) * target->events_capacity);
 
-    target->events[target->event_size++] = event;
+    target->events[target->events_size++] = event;
+}
+
+static void
+incidents_push_ordered(const incident_t *incident)
+{
+    if (incidents_size + 1 > incidents_capacity)
+        incidents = realloc(incidents,
+            2 * sizeof(incident_t) * incidents_capacity);
+
+    size_t i = 0;
+    while (incidents[i].started_time < incident->started_time
+            && i < incidents_size)
+        i++;
+    /* incidents[i].started_time >= incident.started_time */
+    memmove(&incidents[i + 1], &incidents[i],
+        (incidents_size - i) * sizeof(incident_t));
+
+    incidents[i] = *incident;
+
+    incidents_size++;
 }
 
 static size_t
@@ -91,7 +124,7 @@ target_events_load(target_t *target, const char *logbuff) {
             continue;
 
         struct tm event_time;
-        strptime(time, "%Y-%m-%d %H-%M-%S", &event_time);
+        strptime(time, "%Y-%m-%d %H:%M:%S", &event_time);
 
         event_t event = {
             mktime(&event_time),
@@ -104,6 +137,48 @@ target_events_load(target_t *target, const char *logbuff) {
     }
 
     return n;
+}
+
+/* assume events start with down */
+void
+incidents_render()
+{
+    char buff[256];
+
+    for (size_t i = 0; i < targets_n; i++) {
+        /* iterate through downs */
+        for (size_t j = 0; j < targets[i].events_size; j++) {
+            if (targets[i].events[j].status != STATUS_DOWN)
+                continue;
+            /* next must be up */
+            int resolved = 1;
+            if (targets[i].events_size == j + 1 ||
+                    targets[i].events[j + 1].status != STATUS_UP)
+                resolved = 0;
+
+            time_t start = targets[i].events[j].time;
+            time_t duration = targets[i].events[j + 1].time - start;
+
+            snprintf(buff, 256, "%ldh %ldm %lds", duration / 3600,
+                (duration / 60) % 60, duration % 60);
+            char *durationstr = strdup(buff);
+
+            struct tm *tm_start = gmtime(&start);
+            strftime(buff, 256, "%Y-%m-%d %H:%M:%S", tm_start);
+            char *startstr = strdup(buff);
+
+            incident_t incident = {
+                targets[i].events[j].time,
+                duration,
+                resolved,
+                targets[i].name,
+                startstr,
+                durationstr
+            };
+
+            incidents_push_ordered(&incident);
+        }
+    }
 }
 
 int
@@ -152,34 +227,40 @@ monitor_init(const char *cfg_path, const char *log_path) {
         }
 
         if (strcmp(type, "reach") == 0)
-            targets[target_n].type = TYPE_REACH;
+            targets[targets_n].type = TYPE_REACH;
         else if (strcmp(type, "dns") == 0)
-            targets[target_n].type = TYPE_DNS;
+            targets[targets_n].type = TYPE_DNS;
         else if (strcmp(type, "web") == 0)
-            targets[target_n].type = TYPE_WEB;
+            targets[targets_n].type = TYPE_WEB;
 
-        targets[target_n].name = strdup(name);
-        targets[target_n].target = strdup(target);
-        targets[target_n].status = STATUS_DOWN;
+        targets[targets_n].name = strdup(name);
+        targets[targets_n].target = strdup(target);
+        targets[targets_n].status = STATUS_DOWN;
 
         /* read monitor logs */
-        targets[target_n].event_capacity = INIT_VEC_CAPACITY;
-        targets[target_n].event_size = 0;
-        targets[target_n].events = malloc(INIT_VEC_CAPACITY * sizeof(event_t));
+        targets[targets_n].events_capacity = INIT_VEC_CAPACITY;
+        targets[targets_n].events_size = 0;
+        targets[targets_n].events = malloc(INIT_VEC_CAPACITY * sizeof(event_t));
 
-        size_t event_n = target_events_load(&targets[target_n], logbuff);
+        size_t event_n = target_events_load(&targets[targets_n], logbuff);
 
         printf("\t%s: %s,%s %ld events\n",
-            targets[target_n].name,
-            type_str[targets[target_n].type],
-            targets[target_n].target,
+            targets[targets_n].name,
+            type_str[targets[targets_n].type],
+            targets[targets_n].target,
             event_n
         );
         
-        target_n++;
+        targets_n++;
     } 
 
     fclose(cfgf);
+
+    incidents = malloc(sizeof(incident_t) * INIT_VEC_CAPACITY);
+    incidents_capacity = INIT_VEC_CAPACITY;
+    incidents_size = 0;
+
+    incidents_render();
 
     CURLcode res = curl_global_init(CURL_GLOBAL_ALL);
     if (res) {
@@ -188,7 +269,26 @@ monitor_init(const char *cfg_path, const char *log_path) {
         return -1;
     }
 
-        return 0;
+    return 0;
+}
+
+const char *
+target_uptime(const target_t *target)
+{
+    static char buff[256];
+
+    event_t last_event = target->events[target->events_size - 1];
+
+    if (last_event.status == STATUS_DOWN) {
+        snprintf(buff, 256, "-");
+        return buff;
+    }
+
+    time_t uptime = time(NULL) - last_event.time;
+    snprintf(buff, 256, "%ldd %ldh %ldm %lds",
+        uptime / (3600*24), (uptime / 3600) % 24, (uptime / 60) % 60, uptime % 60);
+
+    return buff;
 }
 
 const char *
@@ -203,15 +303,15 @@ monitor_generate_status_html()
    
     char *pos = buff;
 
-    for (size_t i = 0; i < target_n; i++) {
-        pos += snprintf(pos, BUFF_SIZE,
-            "<tr><td>%s</td><td>%s</td>%s<td></td><td>%s</td><td>%s</td>%s</tr>\n",
-            type_str[targets[i].type],
-            targets[i].target,
-            status_html[targets[i].status],
-            "",
-            "",
-            ""
+    for (size_t i = 0; i < targets_n; i++) {
+        pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+            "<tr><td>%s</td><td>%s</td>%s<td>%s</td><td>%s</td><td>%s</td></tr>\n",
+            type_str[targets[i].type],          /* type */
+            targets[i].target,                  /* target */
+            status_html[targets[i].status],     /* status */
+            target_uptime(&targets[i]),         /* uptime */
+            "",                                 /* %up month */
+            ""                                  /* %up total */
         );
     }
 
@@ -223,8 +323,23 @@ const char *
 monitor_generate_incidents_html()
 {
     static char buff[BUFF_SIZE];
-   
-    snprintf(buff, BUFF_SIZE, "<tr><td></td><td></td><td></td></tr>");
+
+    static const char *resolvedstr[] = {
+        "unresolved",
+        "resolved"
+    };
+    
+    char *pos = buff;
+  
+    for (int i = incidents_size - 1; i >= 0; i--) {
+        pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+            "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+            incidents[i].service,
+            resolvedstr[incidents[i].resolved],
+            incidents[i].started,
+            incidents[i].duration
+        );
+    }
 
     return buff;
 }
@@ -323,7 +438,7 @@ monitor_check()
     static size_t check_num = 0;
     time_t time_now = time(NULL);
     struct tm *tm_now = gmtime(&time_now);
-    strftime(timestr, 256, "%Y-%m-%d %H-%M-%S", tm_now);
+    strftime(timestr, 256, "%Y-%m-%d %H:%M:%S", tm_now);
 
     static const int (*check_funcs[])(const char *) = {
         check_reach,
@@ -331,7 +446,7 @@ monitor_check()
         check_http
     };
 
-    for (size_t i = 0; i < target_n; i++) {
+    for (size_t i = 0; i < targets_n; i++) {
         printf("[%s] [monitor] check #%ld %s: ",
             timestr, check_num, targets[i].name);
         targets[i].status = check_funcs[targets[i].type](targets[i].target);
