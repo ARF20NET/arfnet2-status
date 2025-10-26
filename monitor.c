@@ -4,6 +4,7 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
+#include <ctype.h>
 
 #include <curl/curl.h>
 
@@ -63,13 +64,23 @@ static char timestr[256];
 
 
 static void
-target_events_push(target_t *target, event_t event)
+target_events_push_ordered(target_t *target, const event_t *event)
 {
     if (target->events_size + 1 > target->events_capacity)
         target->events = realloc(target->events,
             2 * sizeof(event_t) * target->events_capacity);
 
-    target->events[target->events_size++] = event;
+    size_t i = 0;
+    while (target->events[i].time < event->time
+            && i < target->events_size)
+        i++;
+    /* incidents[i].started_time >= incident.started_time */
+    memmove(&target->events[i + 1], &target->events[i],
+        (target->events_size - i) * sizeof(event_t));
+
+    target->events[i] = *event;
+
+    target->events_size++;
 }
 
 static void
@@ -132,7 +143,7 @@ target_events_load(target_t *target, const char *logbuff)
             strcmp(status, "up") == 0 ? STATUS_UP : STATUS_DOWN
         };
 
-        target_events_push(target, event);
+        target_events_push_ordered(target, &event);
 
         n++;
     }
@@ -158,7 +169,9 @@ incidents_render()
                 resolved = 0;
 
             time_t start = targets[i].events[j].time;
-            time_t duration = targets[i].events[j + 1].time - start;
+            time_t duration = resolved ?
+                targets[i].events[j + 1].time - start :
+                time(NULL) - start;
 
             snprintf(buff, 256, "%ldh %ldm %lds", duration / 3600,
                 (duration / 60) % 60, duration % 60);
@@ -300,6 +313,49 @@ target_uptime(const target_t *target)
     return buff;
 }
 
+float
+target_perc_uptime_since(const target_t *target, time_t since)
+{
+    time_t downtime = 0;
+
+    if (since < target->events[0].time)
+        downtime += target->events[0].time - since;
+
+    for (size_t i = 0; i < incidents_size; i++) {
+        if (strcmp(incidents[i].service, target->name) != 0)
+            continue;
+
+        if (incidents[i].started_time + incidents[i].duration_time < since)
+            continue;
+
+        time_t clamped_duration = incidents[i].duration_time;
+        if (incidents[i].started_time < since)
+            clamped_duration -= since - incidents[i].started_time;
+
+        downtime += clamped_duration;
+    }
+
+    return 100.0f * (1.0f - ((float)downtime / (float)(time(NULL) - since)));
+}
+
+float
+target_perc_uptime_total(const target_t *target)
+{
+    time_t downtime = 0, since = 0;
+
+    for (size_t i = 0; i < incidents_size; i++) {
+        if (strcmp(incidents[i].service, target->name) != 0)
+            continue;
+
+        if (since == 0)
+            since = incidents[i].started_time;
+
+        downtime += incidents[i].duration_time;
+    }
+
+    return 100.0f * (1.0f - ((float)downtime / (float)(time(NULL) - since)));
+}
+
 const char *
 monitor_generate_status_html()
 {
@@ -314,13 +370,13 @@ monitor_generate_status_html()
 
     for (size_t i = 0; i < targets_n; i++) {
         pos += snprintf(pos, BUFF_SIZE - (pos - buff),
-            "<tr><td>%s</td><td>%s</td>%s<td>%s</td><td>%s</td><td>%s</td></tr>\n",
+            "<tr><td>%s</td><td>%s</td>%s<td>%s</td><td>%f</td><td>%f</td></tr>\n",
             type_str[targets[i].type],          /* type */
             targets[i].target,                  /* target */
             status_html[targets[i].status],     /* status */
             target_uptime(&targets[i]),         /* uptime */
-            "",                                 /* %up month */
-            ""                                  /* %up total */
+            target_perc_uptime_since(&targets[i], time(NULL) - (30*24*3600)),
+            target_perc_uptime_total(&targets[i])
         );
     }
 
@@ -392,8 +448,8 @@ check_dns(const char *name)
     fread(cmd_out, 256, 1, pf);
     pclose(pf);
     
-    if (*cmd_out == '\0') {
-        printf("no a\n");
+    if (*cmd_out == '\0' || !isdigit(*cmd_out)) {
+        printf("no a: %s\n", cmd_out);
         return STATUS_DOWN;
     }
     
@@ -462,5 +518,37 @@ monitor_check()
     }
 
     check_num++;
+}
+
+void
+monitor_update_events()
+{
+    static char *status_str[] = {
+        "down",
+        "up"
+    };
+
+    time_t time_now = time(NULL);
+    struct tm *tm_now = gmtime(&time_now);
+    strftime(timestr, 256, "%Y-%m-%d %H:%M:%S", tm_now);
+
+    for (size_t i = 0; i < targets_n; i++) {
+        if (targets[i].events_size > 0 && (
+            targets[i].status ==
+            targets[i].events[targets[i].events_size - 1].status))
+        {
+            continue;
+        }
+
+        event_t event = {
+            time_now,
+            STATUS_UP
+        };
+
+        target_events_push_ordered(&targets[i], &event);
+
+        printf("[%s] [monitor] %s is now %s\n",
+            timestr, targets[i].name, status_str[targets[i].status]);
+    }
 }
 

@@ -101,6 +101,7 @@ int main() {
 
     while (1) {
         monitor_check();
+        monitor_update_events();
         sleep(5);
     }
 }
