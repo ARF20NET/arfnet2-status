@@ -93,7 +93,8 @@ incidents_push_ordered(const incident_t *incident)
 }
 
 static size_t
-target_events_load(target_t *target, const char *logbuff) {
+target_events_load(target_t *target, const char *logbuff)
+{
     char line[256];
     size_t n = 0;
 
@@ -123,11 +124,11 @@ target_events_load(target_t *target, const char *logbuff) {
         if (strcmp(name, target->name) != 0)
             continue;
 
-        struct tm event_time;
-        strptime(time, "%Y-%m-%d %H:%M:%S", &event_time);
+        struct tm event_time = { 0 };
+        strptime(time, "%FT%T%z", &event_time);
 
         event_t event = {
-            mktime(&event_time),
+            mktime(&event_time) - timezone,
             strcmp(status, "up") == 0 ? STATUS_UP : STATUS_DOWN
         };
 
@@ -182,7 +183,8 @@ incidents_render()
 }
 
 int
-monitor_init(const char *cfg_path, const char *log_path) {
+monitor_init(const char *cfg_path, const char *log_path)
+{
     /* read monitor log */
     FILE *logf = fopen(log_path, "r");
     if (!logf) {
@@ -209,6 +211,8 @@ monitor_init(const char *cfg_path, const char *log_path) {
     }
 
     printf("monitor targets:\n");
+
+    tzset(); /* initialize tz conversion */
     
     char line[256];
     while (fgets(line, sizeof(line), cfgf)) {
@@ -276,6 +280,11 @@ const char *
 target_uptime(const target_t *target)
 {
     static char buff[256];
+
+    if (target->events_size == 0) {
+        snprintf(buff, 256, "-");
+        return buff;
+    }
 
     event_t last_event = target->events[target->events_size - 1];
 
