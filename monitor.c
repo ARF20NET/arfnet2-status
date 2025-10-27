@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <time.h>
 #include <ctype.h>
+#include <math.h>
 
 #include <curl/curl.h>
 
@@ -36,7 +37,7 @@ typedef struct {
     char *name;
     char *target;
 
-    status_t status;
+    status_t status, status_1;
 
     event_t *events;
     size_t events_size, events_capacity;
@@ -156,6 +157,8 @@ void
 incidents_render()
 {
     char buff[256];
+
+    incidents_size = 0;
 
     for (size_t i = 0; i < targets_n; i++) {
         /* iterate through downs */
@@ -335,7 +338,7 @@ target_perc_uptime_since(const target_t *target, time_t since)
         downtime += clamped_duration;
     }
 
-    return 100.0f * (1.0f - ((float)downtime / (float)(time(NULL) - since)));
+    return 1.0f - ((float)downtime / (float)(time(NULL) - since));
 }
 
 float
@@ -353,7 +356,74 @@ target_perc_uptime_total(const target_t *target)
         downtime += incidents[i].duration_time;
     }
 
-    return 100.0f * (1.0f - ((float)downtime / (float)(time(NULL) - since)));
+    return 1.0f - ((float)downtime / (float)(time(NULL) - since));
+}
+
+int
+color_map(float perc)
+{
+    return 255.0f*exp2f(100.0f*perc-100.0f);
+}
+
+const char *
+generate_timeline(const target_t *target, time_t since, time_t span)
+{
+    static char buff[BUFF_SIZE];
+
+    char *pos = buff;
+
+    pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+        "<table class=\"graph\" style=\"width:100%%;\"><tr>");
+
+    const incident_t *last_incident = NULL;
+
+    for (size_t i = 0; i < incidents_size; i++) {
+        if (strcmp(incidents[i].service, target->name) != 0)
+            continue;
+
+        if (incidents[i].started_time + incidents[i].duration_time < since)
+            continue;
+
+        time_t clamped_duration = incidents[i].duration_time;
+        if (incidents[i].started_time < since)
+            clamped_duration -= since - incidents[i].started_time;
+
+        if (last_incident) {
+            pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+                "<td class=\"up graph\" style=\"width:%2f%%;\"></td>",
+                100.0f*((float)(incidents[i].started_time -
+                    (last_incident->started_time + last_incident->duration_time)
+                )/(float)span)
+            );
+        } else {
+             pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+                "<td class=\"up graph\" style=\"width:%2f%%;\"></td>",
+                100.0f*((float)(incidents[i].started_time - since)
+                /(float)span)
+            );
+        }
+
+        pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+            "<td class=\"down graph\" style=\"width:%2f%%;\"></td>",
+                100.0f*((float)clamped_duration/(float)span)
+            );
+
+        last_incident = &incidents[i];
+    }
+
+    if (last_incident && last_incident->resolved) {
+            pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+                "<td class=\"up graph\" style=\"width:%2f%%;\"></td>",
+                100.0f*((float)(time(NULL) -
+                    (last_incident->started_time + last_incident->duration_time)
+                )/(float)span)
+            );
+        
+    }
+
+    pos += snprintf(pos, BUFF_SIZE - (pos - buff), "</tr></table>");
+
+    return buff;
 }
 
 const char *
@@ -362,21 +432,30 @@ monitor_generate_status_html()
     static char buff[BUFF_SIZE];
 
     static char *status_html[] = {
-        "<td class=\"down\">down</td>",
-        "<td class=\"up\">up</td>"
+        "<td class=\"w-min down\">down</td>",
+        "<td class=\"w-min up\">up</td>"
     };
    
     char *pos = buff;
 
     for (size_t i = 0; i < targets_n; i++) {
+        float perc_month = target_perc_uptime_since(&targets[i],
+            time(NULL) - (30*24*3600));
+        float perc_total = target_perc_uptime_total(&targets[i]);
+
         pos += snprintf(pos, BUFF_SIZE - (pos - buff),
-            "<tr><td>%s</td><td>%s</td>%s<td>%s</td><td>%f</td><td>%f</td></tr>\n",
+            "<tr><td class=\"w-min\">%s</td>"
+            "<td class=\"w-min\">%s</td>%s<td class=\"w-min\">%s</td>"
+            "<td class=\"w-min\" style=\"background-color:rgb(%d,%d,0);\">%f</td>"
+            "<td class=\"w-min\" style=\"background-color:rgb(%d,%d,0);\">%f</td>"
+            "<td class=\"w-max\">%s</td></tr>\n",
             type_str[targets[i].type],          /* type */
             targets[i].target,                  /* target */
             status_html[targets[i].status],     /* status */
             target_uptime(&targets[i]),         /* uptime */
-            target_perc_uptime_since(&targets[i], time(NULL) - (30*24*3600)),
-            target_perc_uptime_total(&targets[i])
+            255-color_map(perc_month), color_map(perc_month), 100.0f*perc_month,
+            255-color_map(perc_total), color_map(perc_total), 100.0f*perc_total,
+            generate_timeline(&targets[i], time(NULL) - 7*24*3600, 7*24*3600)
         );
     }
 
@@ -540,15 +619,24 @@ monitor_update_events()
             continue;
         }
 
+        if (targets[i].status != targets[i].status_1) {
+            targets[i].status_1 = targets[i].status;
+            continue;
+        }
+
         event_t event = {
             time_now,
-            STATUS_UP
+            targets[i].status
         };
 
         target_events_push_ordered(&targets[i], &event);
 
         printf("[%s] [monitor] %s is now %s\n",
             timestr, targets[i].name, status_str[targets[i].status]);
+
+        incidents_render();
+            
+        targets[i].status_1 = targets[i].status;
     }
 }
 
