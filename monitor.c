@@ -6,6 +6,7 @@
 #include <time.h>
 #include <ctype.h>
 #include <math.h>
+#include <sys/param.h>
 
 #include <curl/curl.h>
 
@@ -280,8 +281,6 @@ monitor_init(const char *cfg_path, const char *log_path)
     incidents_capacity = INIT_VEC_CAPACITY;
     incidents_size = 0;
 
-    incidents_render();
-
     CURLcode res = curl_global_init(CURL_GLOBAL_ALL);
     if (res) {
         fprintf(stderr, "Error initializing cURL: %s\n",
@@ -372,54 +371,45 @@ generate_timeline(const target_t *target, time_t since, time_t span)
 
     char *pos = buff;
 
+    static char *status_str[] = {
+        "down",
+        "up"
+    };
+
     pos += snprintf(pos, BUFF_SIZE - (pos - buff),
         "<table class=\"graph\" style=\"width:100%%;\"><tr>");
 
-    const incident_t *last_incident = NULL;
+    const event_t *last_event = NULL;
 
-    for (size_t i = 0; i < incidents_size; i++) {
-        if (strcmp(incidents[i].service, target->name) != 0)
+    for (size_t i = 0; i < target->events_size; i++) {
+        if (target->events[i].time < since) {
+            last_event = &target->events[i];
             continue;
-
-        if (incidents[i].started_time + incidents[i].duration_time < since)
-            continue;
-
-        time_t clamped_duration = incidents[i].duration_time;
-        if (incidents[i].started_time < since)
-            clamped_duration -= since - incidents[i].started_time;
-
-        if (last_incident) {
-            pos += snprintf(pos, BUFF_SIZE - (pos - buff),
-                "<td class=\"up graph\" style=\"width:%2f%%;\"></td>",
-                100.0f*((float)(incidents[i].started_time -
-                    (last_incident->started_time + last_incident->duration_time)
-                )/(float)span)
-            );
-        } else {
-             pos += snprintf(pos, BUFF_SIZE - (pos - buff),
-                "<td class=\"up graph\" style=\"width:%2f%%;\"></td>",
-                100.0f*((float)(incidents[i].started_time - since)
-                /(float)span)
-            );
         }
 
-        pos += snprintf(pos, BUFF_SIZE - (pos - buff),
-            "<td class=\"down graph\" style=\"width:%2f%%;\"></td>",
-                100.0f*((float)clamped_duration/(float)span)
-            );
-
-        last_incident = &incidents[i];
-    }
-
-    if (last_incident && last_incident->resolved) {
+        if (!last_event) {
             pos += snprintf(pos, BUFF_SIZE - (pos - buff),
-                "<td class=\"up graph\" style=\"width:%2f%%;\"></td>",
-                100.0f*((float)(time(NULL) -
-                    (last_incident->started_time + last_incident->duration_time)
-                )/(float)span)
-            );
-        
+                "<td class=\"graph\" style=\"width:%2f%%;\"></td>",
+                100.0f*((float)(target->events[i].time - since))
+                    /(float)span);
+        } else {
+            pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+                "<td class=\"%s graph\" style=\"width:%2f%%;\"></td>",
+                status_str[last_event->status],
+                100.0f*((float)(target->events[i].time
+                    - MAX(last_event->time, since))
+                    /(float)span));
+        }
+
+        last_event = &target->events[i];
     }
+
+    if (last_event)
+        pos += snprintf(pos, BUFF_SIZE - (pos - buff),
+            "<td class=\"%s graph\" style=\"width:%2f%%;\"></td>",
+            status_str[last_event->status],
+            100.0f*((float)(time(NULL) - last_event->time))
+                /(float)span);
 
     pos += snprintf(pos, BUFF_SIZE - (pos - buff), "</tr></table>");
 
@@ -472,6 +462,8 @@ monitor_generate_incidents_html()
         "unresolved",
         "resolved"
     };
+
+    incidents_render();
     
     char *pos = buff;
   
@@ -634,8 +626,6 @@ monitor_update_events()
         printf("[%s] [monitor] %s is now %s\n",
             timestr, targets[i].name, status_str[targets[i].status]);
 
-        incidents_render();
-            
         targets[i].status_1 = targets[i].status;
     }
 }
