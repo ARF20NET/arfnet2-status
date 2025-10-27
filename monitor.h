@@ -5,6 +5,6 @@ int monitor_init(const char *cfg_file, const char *log_file);
 const char *monitor_generate_status_html();
 const char *monitor_generate_incidents_html();
 void monitor_check();
-void monitor_update_events();
+void monitor_update_events(const char *log_path);
 
 #endif /* _MONITOR_H */

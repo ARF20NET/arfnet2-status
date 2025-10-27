@@ -16,8 +16,14 @@
 
 #include "monitor.h"
 
-#define PORT        8888
 #define RES_BUFF    65535
+
+
+#define PORT        8888
+
+#define CFG_FILE    "monitor.cfg"
+#define TMPL_FILE   "index.htm.tmpl"
+#define LOG_FILE    "events.log"
 
 static char *index_format_template = NULL;
 
@@ -71,7 +77,7 @@ enum MHD_Result answer_to_connection(
 
 int main() {
     /* read index template file */
-    FILE *tf = fopen("index.htm.tmpl", "r");
+    FILE *tf = fopen(TMPL_FILE, "r");
     if (!tf) {
         fprintf(stderr, "error opening index template file: %s\n",
             strerror(errno));
@@ -97,11 +103,11 @@ int main() {
         return 1;
     }
 
-    monitor_init("monitor.cfg", "events.log");
+    monitor_init(CFG_FILE, LOG_FILE);
 
     while (1) {
         monitor_check();
-        monitor_update_events();
+        monitor_update_events(LOG_FILE);
         sleep(5);
     }
 }

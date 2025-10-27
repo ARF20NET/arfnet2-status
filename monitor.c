@@ -291,7 +291,7 @@ monitor_init(const char *cfg_path, const char *log_path)
     return 0;
 }
 
-const char *
+static const char *
 target_uptime(const target_t *target)
 {
     static char buff[256];
@@ -315,7 +315,7 @@ target_uptime(const target_t *target)
     return buff;
 }
 
-float
+static float
 target_perc_uptime_since(const target_t *target, time_t since)
 {
     time_t downtime = 0;
@@ -340,7 +340,7 @@ target_perc_uptime_since(const target_t *target, time_t since)
     return 1.0f - ((float)downtime / (float)(time(NULL) - since));
 }
 
-float
+static float
 target_perc_uptime_total(const target_t *target)
 {
     time_t downtime = 0, since = 0;
@@ -358,13 +358,13 @@ target_perc_uptime_total(const target_t *target)
     return 1.0f - ((float)downtime / (float)(time(NULL) - since));
 }
 
-int
+static int
 color_map(float perc)
 {
     return 255.0f*exp2f(100.0f*perc-100.0f);
 }
 
-const char *
+static const char *
 generate_timeline(const target_t *target, time_t since, time_t span)
 {
     static char buff[BUFF_SIZE];
@@ -574,7 +574,7 @@ monitor_check()
     static size_t check_num = 0;
     time_t time_now = time(NULL);
     struct tm *tm_now = gmtime(&time_now);
-    strftime(timestr, 256, "%Y-%m-%d %H:%M:%S", tm_now);
+    strftime(timestr, 256, "%F %T", tm_now);
 
     static const int (*check_funcs[])(const char *) = {
         check_reach,
@@ -591,8 +591,36 @@ monitor_check()
     check_num++;
 }
 
+static void
+commit_event(const char *log_path, const target_t *target,
+    const event_t *event)
+{
+    static char *status_str[] = {
+        "down",
+        "up"
+    };
+
+    char buff[256];
+
+    FILE *logf = fopen(log_path, "a");
+    if (!logf) {
+        fprintf(stderr,
+            "Error opening log file for writing: %s\n", strerror(errno));
+        return;
+    }
+
+
+    struct tm *tm_event = gmtime(&event->time);
+    strftime(buff, 256, "%FT%T%z", tm_event);
+
+    fprintf(logf, "%s,%s,%s\n",
+        target->name, buff, status_str[event->status]);
+
+    fclose(logf);
+}
+
 void
-monitor_update_events()
+monitor_update_events(const char *log_path)
 {
     static char *status_str[] = {
         "down",
@@ -601,7 +629,7 @@ monitor_update_events()
 
     time_t time_now = time(NULL);
     struct tm *tm_now = gmtime(&time_now);
-    strftime(timestr, 256, "%Y-%m-%d %H:%M:%S", tm_now);
+    strftime(timestr, 256, "%F %T", tm_now);
 
     for (size_t i = 0; i < targets_n; i++) {
         if (targets[i].events_size > 0 && (
@@ -622,6 +650,8 @@ monitor_update_events()
         };
 
         target_events_push_ordered(&targets[i], &event);
+
+        commit_event(log_path, &targets[i], &event);
 
         printf("[%s] [monitor] %s is now %s\n",
             timestr, targets[i].name, status_str[targets[i].status]);
