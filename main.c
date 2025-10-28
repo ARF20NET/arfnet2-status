@@ -12,14 +12,9 @@
 
 #include <microhttpd.h>
 
-
-
 #include "monitor.h"
-
-#define RES_BUFF    65535
-
-
-#define PORT        8888
+#include "config.h"
+#include "check.h"
 
 #define CFG_FILE    "monitor.cfg"
 #define TMPL_FILE   "index.htm.tmpl"
@@ -37,7 +32,7 @@ enum MHD_Result answer_to_connection(
     size_t *upload_data_size,
     void **ptr
 ) {
-    char buff[RES_BUFF];
+    char buff[BUFF_SIZE];
 
     const struct sockaddr_in **coninfo =
         (const struct sockaddr_in**)MHD_get_connection_info(
@@ -55,9 +50,11 @@ enum MHD_Result answer_to_connection(
     int ret;
 
     if (strcmp(method, "GET") == 0 && strcmp(url, "/") == 0) {
-        snprintf(buff, RES_BUFF,
+        snprintf(buff, BUFF_SIZE,
             index_format_template,
-            monitor_generate_status_html(), monitor_generate_incidents_html());
+            timestr,
+            monitor_generate_status_html(),
+            monitor_generate_incidents_html());
 
         response = MHD_create_response_from_buffer(strlen(buff), (void*)buff,
             MHD_RESPMEM_PERSISTENT);
@@ -76,6 +73,8 @@ enum MHD_Result answer_to_connection(
 }
 
 int main() {
+    printf("ARFNET Status Monitor (C) 2025 under GPLv3\n");
+
     /* read index template file */
     FILE *tf = fopen(TMPL_FILE, "r");
     if (!tf) {
@@ -90,12 +89,21 @@ int main() {
     fread(index_format_template, 1, tfs, tf);
     fclose(tf);
 
+    if (config_load(CONFIG_PATH) < 0)
+        return 1;
+
+    if (check_init() < 0)
+        return 1;
+
+    if (monitor_init(CFG_FILE, LOG_FILE) < 0)
+        return 1;
+
     /* start server */
     struct MHD_Daemon *daemon;
 
     daemon = MHD_start_daemon(
         MHD_USE_INTERNAL_POLLING_THREAD | MHD_USE_EPOLL,
-        PORT, NULL, NULL,
+        port, NULL, NULL,
         &answer_to_connection, NULL, MHD_OPTION_END);
 
     if (!daemon) {
@@ -103,12 +111,11 @@ int main() {
         return 1;
     }
 
-    monitor_init(CFG_FILE, LOG_FILE);
 
     while (1) {
-        monitor_check();
+        check_perform(targets, targets_size);
         monitor_update_events(LOG_FILE);
-        sleep(5);
+        sleep(monitor_config.interval);
     }
 }
 

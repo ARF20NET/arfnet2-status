@@ -8,41 +8,10 @@
 #include <math.h>
 #include <sys/param.h>
 
-#include <curl/curl.h>
-
 #include "monitor.h"
 
-#define BUFF_SIZE           65535
-#define INIT_VEC_CAPACITY   256
+#include "config.h"
 
-typedef enum {
-    TYPE_REACH,
-    TYPE_DNS,
-    TYPE_WEB
-} type_t;
-
-const char *type_str[] = { "reach", "dns", "web" };
-
-typedef enum {
-    STATUS_DOWN,
-    STATUS_UP
-} status_t;
-
-typedef struct {
-    time_t time;
-    status_t status;
-} event_t;
-
-typedef struct {
-    type_t type;
-    char *name;
-    char *target;
-
-    status_t status, status_1;
-
-    event_t *events;
-    size_t events_size, events_capacity;
-} target_t;
 
 /* baked */
 typedef struct {
@@ -55,14 +24,18 @@ typedef struct {
 } incident_t;
 
 
-static target_t targets[INIT_VEC_CAPACITY];
-static size_t targets_n = 0;
+const char *type_str[] = { "reach", "dns", "web" };
+
+target_t *targets = NULL;
+size_t targets_size = 0, targets_capacity = INIT_VEC_CAPACITY;
 
 /* ordered*/
 static incident_t *incidents = NULL;
 static size_t incidents_size = 0, incidents_capacity = 0;
 
 static char timestr[256];
+
+static char *status_str[] = { "down", "up" };
 
 
 static void
@@ -161,7 +134,7 @@ incidents_render()
 
     incidents_size = 0;
 
-    for (size_t i = 0; i < targets_n; i++) {
+    for (size_t i = 0; i < targets_size; i++) {
         /* iterate through downs */
         for (size_t j = 0; j < targets[i].events_size; j++) {
             if (targets[i].events[j].status != STATUS_DOWN)
@@ -200,8 +173,10 @@ incidents_render()
 }
 
 int
-monitor_init(const char *cfg_path, const char *log_path)
+monitor_init()
 {
+    targets = malloc(INIT_VEC_CAPACITY * sizeof(target_t));
+
     /* read monitor log */
     FILE *logf = fopen(log_path, "r");
     if (!logf) {
@@ -220,23 +195,21 @@ monitor_init(const char *cfg_path, const char *log_path)
     logbuff[logread] = '\0';
 
 
-    /* read monitoring configuration */
-    FILE *cfgf = fopen(cfg_path, "r");
-    if (!cfgf) {
-        fprintf(stderr, "Error opening config: %s\n", strerror(errno));
-        return -1;
-    }
-
     printf("monitor targets:\n");
 
     tzset(); /* initialize tz conversion */
     
     char line[256];
-    while (fgets(line, sizeof(line), cfgf)) {
-        if (*line == '#' || *line == '\n')
-            continue;
+    char *src_line = monitor_config.target_config;
+    while (src_line != (void*)1) {
+        char *next_line = strchr(src_line, '\n');
+        size_t linelen = next_line ? next_line - src_line : strlen(src_line);
+        strncpy(line, src_line, linelen);
+        line[linelen] = '\0';
+        src_line = next_line + 1;
 
-        line[strlen(line) - 1] = '\0'; /* strip \n */
+        if (*line == '\n' || *line == '\0')
+            continue;
 
         char *type = strtok(line, ",");
         char *name = strtok(NULL, ",");
@@ -248,45 +221,36 @@ monitor_init(const char *cfg_path, const char *log_path)
         }
 
         if (strcmp(type, "reach") == 0)
-            targets[targets_n].type = TYPE_REACH;
+            targets[targets_size].type = TYPE_REACH;
         else if (strcmp(type, "dns") == 0)
-            targets[targets_n].type = TYPE_DNS;
+            targets[targets_size].type = TYPE_DNS;
         else if (strcmp(type, "web") == 0)
-            targets[targets_n].type = TYPE_WEB;
+            targets[targets_size].type = TYPE_WEB;
 
-        targets[targets_n].name = strdup(name);
-        targets[targets_n].target = strdup(target);
-        targets[targets_n].status = STATUS_DOWN;
+        targets[targets_size].name = strdup(name);
+        targets[targets_size].target = strdup(target);
+        targets[targets_size].status = STATUS_DOWN;
 
         /* read monitor logs */
-        targets[targets_n].events_capacity = INIT_VEC_CAPACITY;
-        targets[targets_n].events_size = 0;
-        targets[targets_n].events = malloc(INIT_VEC_CAPACITY * sizeof(event_t));
+        targets[targets_size].events_capacity = INIT_VEC_CAPACITY;
+        targets[targets_size].events_size = 0;
+        targets[targets_size].events = malloc(INIT_VEC_CAPACITY * sizeof(event_t));
 
-        size_t event_n = target_events_load(&targets[targets_n], logbuff);
+        size_t event_n = target_events_load(&targets[targets_size], logbuff);
 
         printf("\t%s: %s,%s %ld events\n",
-            targets[targets_n].name,
-            type_str[targets[targets_n].type],
-            targets[targets_n].target,
+            targets[targets_size].name,
+            type_str[targets[targets_size].type],
+            targets[targets_size].target,
             event_n
         );
         
-        targets_n++;
+        targets_size++;
     } 
-
-    fclose(cfgf);
 
     incidents = malloc(sizeof(incident_t) * INIT_VEC_CAPACITY);
     incidents_capacity = INIT_VEC_CAPACITY;
     incidents_size = 0;
-
-    CURLcode res = curl_global_init(CURL_GLOBAL_ALL);
-    if (res) {
-        fprintf(stderr, "Error initializing cURL: %s\n",
-            curl_easy_strerror(res));
-        return -1;
-    }
 
     return 0;
 }
@@ -371,11 +335,6 @@ generate_timeline(const target_t *target, time_t since, time_t span)
 
     char *pos = buff;
 
-    static char *status_str[] = {
-        "down",
-        "up"
-    };
-
     pos += snprintf(pos, BUFF_SIZE - (pos - buff),
         "<table class=\"graph\" style=\"width:100%%;\"><tr>");
 
@@ -428,7 +387,7 @@ monitor_generate_status_html()
    
     char *pos = buff;
 
-    for (size_t i = 0; i < targets_n; i++) {
+    for (size_t i = 0; i < targets_size; i++) {
         float perc_month = target_perc_uptime_since(&targets[i],
             time(NULL) - (30*24*3600));
         float perc_total = target_perc_uptime_total(&targets[i]);
@@ -480,126 +439,10 @@ monitor_generate_incidents_html()
     return buff;
 }
 
-static int
-check_reach(const char *target)
-{
-    static char ping_cmd[256];
-    
-    snprintf(ping_cmd, 256, "ping -W1 -c1 %s > /dev/null", target);
-    /* i know */
-    if (system(ping_cmd) == 0) {
-        printf("reachable\n");
-        return STATUS_UP;
-    } else {
-        printf("unreachable\n");
-        return STATUS_DOWN;
-    }
-}
-
-static int
-check_dns(const char *name)
-{
-    static char dig_cmd[512];
-    static char cmd_out[256];
-
-    snprintf(dig_cmd, 512, "dig +nocookie +short %s NS", name);
-    FILE *pf = popen(dig_cmd, "r");
-    fread(cmd_out, 256, 1, pf);
-    pclose(pf);
-
-    if (*cmd_out == '\0') {
-        printf("no ns\n");
-        return STATUS_DOWN;
-    }
-    
-    *strchr(cmd_out, '\n') = '\0';
-
-    snprintf(dig_cmd, 512, "dig +nocookie +short @%s %s A", cmd_out, name);
-    pf = popen(dig_cmd, "r");
-    fread(cmd_out, 256, 1, pf);
-    pclose(pf);
-    
-    if (*cmd_out == '\0' || !isdigit(*cmd_out)) {
-        printf("no a: %s\n", cmd_out);
-        return STATUS_DOWN;
-    }
-    
-    *strchr(cmd_out, '\n') = '\0';
-
-    printf("%s\n", cmd_out);
-
-    return STATUS_UP;
-}
-
-static size_t
-write_data(void *ptr, size_t size, size_t nmemb, void *stream)
-{
-    return size * nmemb;
-}
-
-static int
-check_http(const char *endpoint)
-{
-    CURL *curl = curl_easy_init();
-    if (!curl) {
-        fprintf(stderr, "Error allocating cURL handle\n");
-        return -1;
-    }
-
-    //curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 1);
-
-    curl_easy_setopt(curl, CURLOPT_URL, endpoint);
-    CURLcode curl_code = curl_easy_perform(curl);
-    if (curl_code != CURLE_OK) {
-        printf("curl_easy_perform() failed: %s\n",
-            curl_easy_strerror(curl_code));
-        return STATUS_DOWN;
-    }
-
-    long http_code;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
-    curl_easy_cleanup(curl);
-
-    printf("%ld\n", http_code);
-
-    return http_code == 200 ? STATUS_UP : STATUS_DOWN;
-}
-
-void
-monitor_check()
-{
-    static size_t check_num = 0;
-    time_t time_now = time(NULL);
-    struct tm *tm_now = gmtime(&time_now);
-    strftime(timestr, 256, "%F %T", tm_now);
-
-    static const int (*check_funcs[])(const char *) = {
-        check_reach,
-        check_dns,
-        check_http
-    };
-
-    for (size_t i = 0; i < targets_n; i++) {
-        printf("[%s] [monitor] check #%ld %s: ",
-            timestr, check_num, targets[i].name);
-        targets[i].status = check_funcs[targets[i].type](targets[i].target);
-    }
-
-    check_num++;
-}
-
 static void
 commit_event(const char *log_path, const target_t *target,
     const event_t *event)
 {
-    static char *status_str[] = {
-        "down",
-        "up"
-    };
-
     char buff[256];
 
     FILE *logf = fopen(log_path, "a");
@@ -619,19 +462,15 @@ commit_event(const char *log_path, const target_t *target,
     fclose(logf);
 }
 
+
 void
 monitor_update_events(const char *log_path)
 {
-    static char *status_str[] = {
-        "down",
-        "up"
-    };
-
     time_t time_now = time(NULL);
     struct tm *tm_now = gmtime(&time_now);
     strftime(timestr, 256, "%F %T", tm_now);
 
-    for (size_t i = 0; i < targets_n; i++) {
+    for (size_t i = 0; i < targets_size; i++) {
         if (targets[i].events_size > 0 && (
             targets[i].status ==
             targets[i].events[targets[i].events_size - 1].status))
