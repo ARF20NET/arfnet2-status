@@ -24,7 +24,8 @@ typedef struct {
 } incident_t;
 
 
-const char *type_str[] = { "reach", "dns", "web" };
+static const char *status_str[] = { "down", "up" };
+static const char *type_str[] = { "reach", "dns", "web" };
 
 target_t *targets = NULL;
 size_t targets_size = 0, targets_capacity = INIT_VEC_CAPACITY;
@@ -35,7 +36,6 @@ static size_t incidents_size = 0, incidents_capacity = 0;
 
 static char timestr[256];
 
-static char *status_str[] = { "down", "up" };
 
 
 static void
@@ -215,7 +215,7 @@ monitor_init()
         char *name = strtok(NULL, ",");
         char *target = strtok(NULL, ",");
 
-        if (!target || !name || !target) {
+        if (!type || !name || !target) {
             fprintf(stderr, "malformed config line: %s\n", line);
             continue;
         }
@@ -226,6 +226,10 @@ monitor_init()
             targets[targets_size].type = TYPE_DNS;
         else if (strcmp(type, "web") == 0)
             targets[targets_size].type = TYPE_WEB;
+        else {
+            fprintf(stderr, "unknown target type: %s\n", line);
+            continue;
+        }
 
         targets[targets_size].name = strdup(name);
         targets[targets_size].target = strdup(target);
@@ -246,7 +250,7 @@ monitor_init()
         );
         
         targets_size++;
-    } 
+    }
 
     incidents = malloc(sizeof(incident_t) * INIT_VEC_CAPACITY);
     incidents_capacity = INIT_VEC_CAPACITY;

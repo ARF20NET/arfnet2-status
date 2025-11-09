@@ -73,7 +73,7 @@ config_load(const char *conf_path)
                 cfgsize - (target_pos - monitor_config.target_config),
                 "%s", value);
         } else if (strcmp(line, "alert") == 0) {
-            target_pos += snprintf(alert_pos,
+            alert_pos += snprintf(alert_pos,
                 cfgsize - (alert_pos - alert_config.alert_config),
                 "%s", value);
         } else {

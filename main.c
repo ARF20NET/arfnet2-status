@@ -15,6 +15,7 @@
 #include "monitor.h"
 #include "config.h"
 #include "check.h"
+#include "alert.h"
 
 #define CFG_FILE    "monitor.cfg"
 #define TMPL_FILE   "index.htm.tmpl"
@@ -95,7 +96,10 @@ int main() {
     if (check_init() < 0)
         return 1;
 
-    if (monitor_init(CFG_FILE, LOG_FILE) < 0)
+    if (monitor_init() < 0)
+        return 1;
+    
+    if (alert_init() < 0)
         return 1;
 
     /* start server */
