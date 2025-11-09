@@ -7,7 +7,7 @@ typedef enum {
     TYPE_REACH,
     TYPE_DNS,
     TYPE_WEB
-} type_t;
+} mon_type_t;
 
 typedef enum {
     STATUS_DOWN,
@@ -20,7 +20,7 @@ typedef struct {
 } event_t;
 
 typedef struct {
-    type_t type;
+    mon_type_t type;
     char *name;
     char *target;
 
