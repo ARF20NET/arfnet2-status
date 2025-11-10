@@ -10,6 +10,7 @@
 
 #define DEFAULT_PORT        8888
 #define DEFAULT_INTERVAL    60
+#define DEFAULT_TMPL_PATH   "index.htm.tmpl"
 #define DEFAULT_LOG_PATH    "events.log"
 
 /* config types */
@@ -29,6 +30,7 @@ typedef struct {
 
 /* config objects */
 extern unsigned short port;
+extern char *tmpl_path;
 extern char *log_path;
 extern monitor_config_t monitor_config;
 extern alert_config_t   alert_config;

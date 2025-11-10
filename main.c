@@ -17,9 +17,6 @@
 #include "check.h"
 #include "alert.h"
 
-#define CFG_FILE    "monitor.cfg"
-#define TMPL_FILE   "index.htm.tmpl"
-#define LOG_FILE    "events.log"
 
 static char *index_format_template = NULL;
 
@@ -76,8 +73,11 @@ enum MHD_Result answer_to_connection(
 int main() {
     printf("ARFNET Status Monitor (C) 2025 under GPLv3\n");
 
+    if (config_load(CONFIG_PATH) < 0)
+        return 1;
+
     /* read index template file */
-    FILE *tf = fopen(TMPL_FILE, "r");
+    FILE *tf = fopen(tmpl_path, "r");
     if (!tf) {
         fprintf(stderr, "error opening index template file: %s\n",
             strerror(errno));
@@ -89,9 +89,6 @@ int main() {
     index_format_template = malloc(tfs);
     fread(index_format_template, 1, tfs, tf);
     fclose(tf);
-
-    if (config_load(CONFIG_PATH) < 0)
-        return 1;
 
     if (check_init() < 0)
         return 1;
@@ -115,10 +112,9 @@ int main() {
         return 1;
     }
 
-
     while (1) {
         check_perform(targets, targets_size);
-        monitor_update_events(LOG_FILE);
+        monitor_update_events(log_path);
         sleep(monitor_config.interval);
     }
 }

@@ -181,7 +181,7 @@ monitor_init()
     /* read monitor log */
     FILE *logf = fopen(log_path, "r");
     if (!logf) {
-        fprintf(stderr, "Error opening log: %s\n", strerror(errno));
+        fprintf(stderr, "Error opening log for reading: %s\n", strerror(errno));
         return -1;
     }
 
@@ -461,9 +461,11 @@ commit_event(const char *log_path, const target_t *target,
     struct tm *tm_event = gmtime(&event->time);
     strftime(buff, 256, "%FT%T%z", tm_event);
 
-    fprintf(logf, "%s,%s,%s\n",
+    int bytes =fprintf(logf, "%s,%s,%s\n",
         target->name, buff, status_str[event->status]);
 
+    if (bytes <= 0)
+        fprintf(stderr, "error committing event\n");
     fclose(logf);
 }
 

@@ -5,8 +5,9 @@
 #include <string.h>
 #include <errno.h>
 
-unsigned short port = DEFAULT_PORT;
-char *log_path = DEFAULT_LOG_PATH;
+unsigned short port = 0;
+char *tmpl_path = NULL;
+char *log_path = NULL;
 monitor_config_t monitor_config = { .interval = DEFAULT_INTERVAL };
 alert_config_t   alert_config = { 0 };
 
@@ -60,6 +61,9 @@ config_load(const char *conf_path)
                 fprintf(stderr, "[config] invalid interval: %s\n", line);
                 return -1;
             }
+        } else if (strcmp(line, "interval") == 0) {
+            tmpl_path = strdup(value);
+            printf("\ttemplate: %s\n", tmpl_path);
         } else if (strcmp(line, "log") == 0) {
             value[strlen(value) - 1] = '\0';
             log_path = strdup(value);
@@ -96,6 +100,23 @@ config_load(const char *conf_path)
     }
 
     fclose(cfgf);
+
+    if (port == 0) {
+        fprintf(stderr, "[config] W: no port, using default\n");
+        port = DEFAULT_PORT;
+    }
+
+    if (!tmpl_path) {
+        fprintf(stderr, "[config] W: no template file given, using default\n");
+        tmpl_path = DEFAULT_TMPL_PATH;
+    }
+
+    if (!log_path) {
+        fprintf(stderr, "[config] W: no template event log path given, "
+            "using default\n");
+        log_path = DEFAULT_LOG_PATH;
+    }
+
 
     if (!alert_config.from || !alert_config.mail_server)
         fprintf(stderr, "[config] W: no mail\n");

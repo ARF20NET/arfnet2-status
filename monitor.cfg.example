@@ -5,7 +5,10 @@
 port=8888
 
 # monitor interval in seconds (sleep)
-interval=5
+interval=60
+
+# html template path
+template=index.htm.tmpl
 
 # monitor events log path
 log=events.log
