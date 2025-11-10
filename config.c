@@ -61,7 +61,7 @@ config_load(const char *conf_path)
                 fprintf(stderr, "[config] invalid interval: %s\n", line);
                 return -1;
             }
-        } else if (strcmp(line, "interval") == 0) {
+        } else if (strcmp(line, "template") == 0) {
             tmpl_path = strdup(value);
             printf("\ttemplate: %s\n", tmpl_path);
         } else if (strcmp(line, "log") == 0) {
