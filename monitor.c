@@ -10,6 +10,7 @@
 
 #include "monitor.h"
 
+#include "alert.h"
 #include "config.h"
 
 
@@ -498,6 +499,8 @@ monitor_update_events(const char *log_path)
 
         printf("[%s] [monitor] %s is now %s\n",
             timestr, targets[i].name, status_str[targets[i].status]);
+
+        alert_trigger(&targets[i]);
 
         targets[i].status_1 = targets[i].status;
     }

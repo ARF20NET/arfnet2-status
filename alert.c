@@ -130,8 +130,8 @@ alert_init()
         alerts[alerts_size].body_tmpl = strdup(body_tmpl);
 
         printf("\t%s: %s\n",
-            alerts[alerts_size].target,
-            type_str[alerts[alerts_size].type]
+            type_str[alerts[alerts_size].type],
+            alerts[alerts_size].target
         );
 
         alerts_size++;
@@ -157,9 +157,9 @@ alert_trigger(const target_t *target)
     strftime(timestr, 256, "%F %T", tm_now);
 
     for (int i = 0; i < alerts_size; i++) {
-        printf("[%s] [monitor] alerted %s about %s\n",
+        printf("[%s] [monitor] alerted %.16s about %s\n",
             timestr, alerts[i].target, target->name);
-        send_funcs[target->type](target, alerts[i].target, alerts[i].extra,
+        send_funcs[alerts[i].type](target, alerts[i].target, alerts[i].extra,
             alerts[i].body_tmpl);
     }
 }
