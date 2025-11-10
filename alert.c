@@ -25,7 +25,6 @@ size_t alerts_size = 0, alerts_capacity = INIT_VEC_CAPACITY;
 
 static const char *type_str[] = { "api", "email" };
 static const char *status_str[] = { "down", "up" };
-static const char *from = NULL;
 
 
 static size_t
@@ -73,15 +72,93 @@ send_api(const target_t *target, const char *endpoint, const char *content_type,
 
     printf("%ld\n", http_code);
 
-    return http_code == 200 ? STATUS_UP : STATUS_DOWN;
+    return http_code;
 }
 
+typedef struct {
+    size_t bytes_read;
+    char *body;
+} email_send_status_t;
+
+static size_t
+read_cb(char *ptr, size_t size, size_t nmemb, void *userp)
+{
+    email_send_status_t *send_status = (email_send_status_t *)userp;
+    const char *data;
+    size_t len;
+ 
+    if ((size * nmemb) == 0) {
+        return 0;
+    }
+ 
+    data = &send_status->body[send_status->bytes_read];
+ 
+    len = strlen(data);
+    if(size * nmemb < len)
+        len = size * nmemb;
+    memcpy(ptr, data, len);
+    send_status->bytes_read += len;
+ 
+    return len;
+}
 
 static int
-send_email(const target_t *target, const char *address, const char *subject_tmpl,
-    const char *body_tmpl)
+send_email(const target_t *target, const char *address,
+    const char *subject_tmpl, const char *body_tmpl)
 {
+    static char buff[4096], buff2[1024], buff3[1024], timestr[256];
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "Error allocating cURL handle\n");
+        return -1;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, alert_config.mail_server);
+    curl_easy_setopt(curl, CURLOPT_MAIL_FROM, alert_config.from);
+
+    curl_easy_setopt(curl, CURLOPT_USERNAME, alert_config.user);
+    curl_easy_setopt(curl, CURLOPT_PASSWORD, alert_config.password);
+
     
+    time_t now = time(NULL);
+    struct tm *tm_now = gmtime(&now);
+    strftime(timestr, 256, "%a, %d %b %Y %T %z", tm_now);
+
+    snprintf(buff2, 1024, subject_tmpl, target->name,
+        status_str[target->status]);
+    snprintf(buff3, 1024, body_tmpl, target->name, status_str[target->status]);
+    snprintf(buff, 4096, "Date: %s\r\nTo: %s\r\nFrom: %s\r\n"
+        "Subject: %s\r\n\r\n%s\r\n", timestr, address, alert_config.from,
+        buff2, buff3);
+
+    email_send_status_t send_status = {
+        .bytes_read = 0,
+        .body = buff
+    };
+    curl_easy_setopt(curl, CURLOPT_READFUNCTION, read_cb);
+    curl_easy_setopt(curl, CURLOPT_READDATA, &send_status);
+    curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
+
+    struct curl_slist *recipients = NULL;
+    recipients = curl_slist_append(recipients, address);
+    curl_easy_setopt(curl, CURLOPT_MAIL_RCPT, recipients);
+
+    CURLcode curl_code = curl_easy_perform(curl);
+    if (curl_code != CURLE_OK) {
+        printf("curl_easy_perform() failed: %s\n",
+            curl_easy_strerror(curl_code));
+        return STATUS_DOWN;
+    }
+
+    long resp_code;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp_code);
+
+    curl_easy_cleanup(curl);
+
+    printf("%ld\n", resp_code);
+
+    return resp_code;
 }
 
 
@@ -90,8 +167,6 @@ alert_init()
 {
     alerts = malloc(INIT_VEC_CAPACITY * sizeof(alert_t));
 
-    from = alert_config.from;
-    
     printf("alerts:\n");
 
     char line[256];
@@ -157,7 +232,7 @@ alert_trigger(const target_t *target)
     strftime(timestr, 256, "%F %T", tm_now);
 
     for (int i = 0; i < alerts_size; i++) {
-        printf("[%s] [monitor] alerted %.16s about %s\n",
+        printf("[%s] [monitor] alerted %.16s about %s: ",
             timestr, alerts[i].target, target->name);
         send_funcs[alerts[i].type](target, alerts[i].target, alerts[i].extra,
             alerts[i].body_tmpl);

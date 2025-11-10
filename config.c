@@ -8,7 +8,7 @@
 unsigned short port = DEFAULT_PORT;
 char *log_path = DEFAULT_LOG_PATH;
 monitor_config_t monitor_config = { .interval = DEFAULT_INTERVAL };
-alert_config_t   alert_config;
+alert_config_t   alert_config = { 0 };
 
 int
 config_load(const char *conf_path)
@@ -64,11 +64,23 @@ config_load(const char *conf_path)
             value[strlen(value) - 1] = '\0';
             log_path = strdup(value);
             printf("\tlog path: %s\n", log_path);
-        } else if (strcmp(line, "from") == 0) {
+        } else if (strcmp(line, "mailserver") == 0) {
+            value[strlen(value) - 1] = '\0';
+            alert_config.mail_server = strdup(value);
+            printf("\tmailserver: %s\n", alert_config.mail_server);
+        } else if (strcmp(line, "mailfrom") == 0) {
             value[strlen(value) - 1] = '\0';
             alert_config.from = strdup(value);
             printf("\tfrom: %s\n", log_path);
-        } else if (strcmp(line, "target") == 0) {
+        } else if (strcmp(line, "mailuser") == 0) {
+            value[strlen(value) - 1] = '\0';
+            alert_config.user = strdup(value);
+        } else if (strcmp(line, "mailpassword") == 0) {
+            value[strlen(value) - 1] = '\0';
+            alert_config.password = strdup(value);
+        }
+
+        else if (strcmp(line, "target") == 0) {
             target_pos += snprintf(target_pos,
                 cfgsize - (target_pos - monitor_config.target_config),
                 "%s", value);
@@ -84,6 +96,9 @@ config_load(const char *conf_path)
     }
 
     fclose(cfgf);
+
+    if (!alert_config.from || !alert_config.mail_server)
+        fprintf(stderr, "[config] W: no mail\n");
 
     return 0;
 }

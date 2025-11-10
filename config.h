@@ -19,7 +19,10 @@ typedef struct {
 } monitor_config_t;
 
 typedef struct {
+    char *mail_server;
     char *from;
+    char *user;
+    char *password;
     char *alert_config;
 } alert_config_t;
 
