@@ -117,9 +117,10 @@ send_email(const target_t *target, const char *address,
     curl_easy_setopt(curl, CURLOPT_URL, alert_config.mail_server);
     curl_easy_setopt(curl, CURLOPT_MAIL_FROM, alert_config.from);
 
-    curl_easy_setopt(curl, CURLOPT_USERNAME, alert_config.user);
-    curl_easy_setopt(curl, CURLOPT_PASSWORD, alert_config.password);
-
+    if (alert_config.user) {
+        curl_easy_setopt(curl, CURLOPT_USERNAME, alert_config.user);
+        curl_easy_setopt(curl, CURLOPT_PASSWORD, alert_config.password);
+    }
     
     time_t now = time(NULL);
     struct tm *tm_now = gmtime(&now);
@@ -146,9 +147,8 @@ send_email(const target_t *target, const char *address,
 
     CURLcode curl_code = curl_easy_perform(curl);
     if (curl_code != CURLE_OK) {
-        printf("curl_easy_perform() failed: %s\n",
+        printf("curl_easy_perform() failed: %s: ",
             curl_easy_strerror(curl_code));
-        return STATUS_DOWN;
     }
 
     long resp_code;
