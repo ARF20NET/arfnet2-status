@@ -8,7 +8,10 @@
 unsigned short port = 0;
 char *tmpl_path = NULL;
 char *log_path = NULL;
-monitor_config_t monitor_config = { .interval = DEFAULT_INTERVAL };
+monitor_config_t monitor_config = {
+    .interval = DEFAULT_INTERVAL,
+    .samples = DEFAULT_SAMPLES
+};
 alert_config_t   alert_config = { 0 };
 
 int
@@ -59,6 +62,13 @@ config_load(const char *conf_path)
             printf("\tinterval: %ld\n", monitor_config.interval);
             if (monitor_config.interval == 0) {
                 fprintf(stderr, "[config] invalid interval: %s\n", line);
+                return -1;
+            }
+        } else if (strcmp(line, "samples") == 0) {
+            monitor_config.samples = atoi(value);
+            printf("\tsamples: %d\n", monitor_config.samples);
+            if (monitor_config.samples == 0) {
+                fprintf(stderr, "[config] invalid samples: %s\n", line);
                 return -1;
             }
         } else if (strcmp(line, "template") == 0) {

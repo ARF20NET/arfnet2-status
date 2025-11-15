@@ -55,7 +55,7 @@ send_api(const target_t *target, const char *endpoint, const char *content_type,
     list = curl_slist_append(list, buff); /* copies */
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
 
-    snprintf(buff, 4096, body_tmpl, target->name, status_str[target->status]);
+    snprintf(buff, 4096, body_tmpl, target->name, status_str[target->status[0]]);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, buff);
 
     CURLcode curl_code = curl_easy_perform(curl);
@@ -127,8 +127,8 @@ send_email(const target_t *target, const char *address,
     strftime(timestr, 256, "%a, %d %b %Y %T %z", tm_now);
 
     snprintf(buff2, 1024, subject_tmpl, target->name,
-        status_str[target->status]);
-    snprintf(buff3, 1024, body_tmpl, target->name, status_str[target->status]);
+        status_str[target->status[0]]);
+    snprintf(buff3, 1024, body_tmpl, target->name, status_str[target->status[0]]);
     snprintf(buff, 4096, "Date: %s\r\nTo: %s\r\nFrom: %s\r\n"
         "Subject: %s\r\n\r\n%s\r\n", timestr, address, alert_config.from,
         buff2, buff3);
@@ -181,10 +181,10 @@ alert_init()
         if (*line == '\n' || *line == '\0')
             continue;
 
-        char *type = strtok(line, ",");
-        char *target = strtok(NULL, ",");
-        char *extra = strtok(NULL, ",");
-        char *body_tmpl = strtok(NULL, ",");
+        char *type = strtok(line, ";");
+        char *target = strtok(NULL, ";");
+        char *extra = strtok(NULL, ";");
+        char *body_tmpl = strtok(NULL, ";");
 
         if (!type || !target) {
             fprintf(stderr, "malformed config line: %s\n", line);

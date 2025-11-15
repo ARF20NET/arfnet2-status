@@ -6,6 +6,8 @@ port=8888
 
 # monitor interval in seconds (sleep)
 interval=60
+# verify 5 times
+samples=5
 
 # html template path
 template=index.htm.tmpl

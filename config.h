@@ -10,12 +10,14 @@
 
 #define DEFAULT_PORT        8888
 #define DEFAULT_INTERVAL    60
+#define DEFAULT_SAMPLES     60
 #define DEFAULT_TMPL_PATH   "index.htm.tmpl"
 #define DEFAULT_LOG_PATH    "events.log"
 
 /* config types */
 typedef struct {
     time_t interval;
+    int samples;
     char *target_config;
 } monitor_config_t;
 

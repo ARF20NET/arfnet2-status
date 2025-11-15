@@ -23,9 +23,7 @@ typedef struct {
     mon_type_t type;
     char *name;
     char *target;
-
-    status_t status, status_1;
-
+    status_t *status;
     event_t *events;
     size_t events_size, events_capacity;
 } target_t;

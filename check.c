@@ -113,7 +113,7 @@ check_perform(target_t *targets, size_t targets_n)
     for (size_t i = 0; i < targets_n; i++) {
         printf("[%s] [monitor] check #%ld %s: ",
             timestr, check_num, targets[i].name);
-        targets[i].status = check_funcs[targets[i].type](targets[i].target);
+        targets[i].status[0] = check_funcs[targets[i].type](targets[i].target);
     }
 
     check_num++;

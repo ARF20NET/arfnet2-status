@@ -212,9 +212,9 @@ monitor_init()
         if (*line == '\n' || *line == '\0')
             continue;
 
-        char *type = strtok(line, ",");
-        char *name = strtok(NULL, ",");
-        char *target = strtok(NULL, ",");
+        char *type = strtok(line, ";");
+        char *name = strtok(NULL, ";");
+        char *target = strtok(NULL, ";");
 
         if (!type || !name || !target) {
             fprintf(stderr, "malformed config line: %s\n", line);
@@ -235,6 +235,9 @@ monitor_init()
         targets[targets_size].name = strdup(name);
         targets[targets_size].target = strdup(target);
         targets[targets_size].status = STATUS_DOWN;
+
+        targets[targets_size].status =
+            malloc(sizeof(status_t) * monitor_config.samples);
 
         /* read monitor logs */
         targets[targets_size].events_capacity = INIT_VEC_CAPACITY;
@@ -405,7 +408,7 @@ monitor_generate_status_html()
             "<td class=\"w-max\">%s</td></tr>\n",
             type_str[targets[i].type],          /* type */
             targets[i].target,                  /* target */
-            status_html[targets[i].status],     /* status */
+            status_html[targets[i].status[0]],     /* status */
             target_uptime(&targets[i]),         /* uptime */
             255-color_map(perc_month), color_map(perc_month), 100.0f*perc_month,
             255-color_map(perc_total), color_map(perc_total), 100.0f*perc_total,
@@ -469,7 +472,6 @@ commit_event(const char *log_path, const target_t *target,
     fclose(logf);
 }
 
-
 void
 monitor_update_events(const char *log_path)
 {
@@ -479,20 +481,20 @@ monitor_update_events(const char *log_path)
 
     for (size_t i = 0; i < targets_size; i++) {
         if (targets[i].events_size > 0 && (
-            targets[i].status ==
+            targets[i].status[0] ==
             targets[i].events[targets[i].events_size - 1].status))
         {
             continue;
         }
 
-        if (targets[i].status != targets[i].status_1) {
-            targets[i].status_1 = targets[i].status;
-            continue;
+        for (int j = 0; j < monitor_config.samples - 1; j++) {
+            if (targets[i].status[j] != targets[i].status[j + 1])
+                goto unstable;
         }
 
         event_t event = {
             time_now,
-            targets[i].status
+            targets[i].status[0]
         };
 
         target_events_push_ordered(&targets[i], &event);
@@ -500,11 +502,12 @@ monitor_update_events(const char *log_path)
         commit_event(log_path, &targets[i], &event);
 
         printf("[%s] [monitor] %s is now %s\n",
-            timestr, targets[i].name, status_str[targets[i].status]);
+            timestr, targets[i].name, status_str[targets[i].status[0]]);
 
         alert_trigger(&targets[i]);
-
-        targets[i].status_1 = targets[i].status;
+unstable:
+        memmove(&targets[i].status[1], &targets[i].status[0],
+            sizeof(int) * (monitor_config.samples - 1));
     }
 }
 
